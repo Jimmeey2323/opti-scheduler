@@ -12,6 +12,7 @@ import MonthlyView from './components/MonthlyView';
 import YearlyView from './components/YearlyView';
 import AnalyticsView from './components/AnalyticsView';
 import DailyAIOptimizer from './components/DailyAIOptimizer';
+import EnhancedOptimizerModal from './components/EnhancedOptimizerModal';
 import { ClassData, ScheduledClass, TeacherHours, CustomTeacher, TeacherAvailability } from './types';
 import { getTopPerformingClasses, getClassDuration, calculateTeacherHours, getClassCounts, validateTeacherHours, getTeacherSpecialties, getClassAverageForSlot, getBestTeacherForClass, generateIntelligentSchedule, getDefaultTopClasses } from './utils/classUtils';
 import { aiService } from './utils/aiService';
@@ -29,6 +30,7 @@ function App() {
   const [editingClass, setEditingClass] = useState<ScheduledClass | null>(null);
   const [teacherHours, setTeacherHours] = useState<TeacherHours>({});
   const [showOptimizer, setShowOptimizer] = useState(false);
+  const [showEnhancedOptimizer, setShowEnhancedOptimizer] = useState(false);
   const [showDailyOptimizer, setShowDailyOptimizer] = useState(false);
   const [showAISettings, setShowAISettings] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -228,6 +230,7 @@ function App() {
     setScheduledClasses(optimizedClasses);
     setTeacherHours(teacherHoursCheck);
     setShowOptimizer(false);
+    setShowEnhancedOptimizer(false);
     setShowDailyOptimizer(false);
   };
 
@@ -246,12 +249,12 @@ function App() {
     setIsPopulatingTopClasses(true);
 
     try {
-      // Get default top classes and populate them
-      const defaultTopClasses = getDefaultTopClasses();
+      // Filter classes with average > 5.0 participants
+      const topPerformingClasses = getTopPerformingClasses(data, 5.0, true);
       const newScheduledClasses: ScheduledClass[] = [];
       const teacherHoursTracker: Record<string, number> = {};
 
-      for (const topClass of defaultTopClasses) {
+      for (const topClass of topPerformingClasses.slice(0, 50)) { // Limit to top 50
         // Check if teacher can take more hours
         const teacherName = topClass.teacher;
         const currentHours = teacherHoursTracker[teacherName] || 0;
@@ -259,7 +262,7 @@ function App() {
 
         if (currentHours + classDuration <= 15) {
           const scheduledClass: ScheduledClass = {
-            id: `default-top-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: `top-class-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             day: topClass.day,
             time: topClass.time,
             location: topClass.location,
@@ -268,9 +271,9 @@ function App() {
             teacherLastName: topClass.teacher.split(' ').slice(1).join(' ') || '',
             duration: getClassDuration(topClass.classFormat),
             participants: Math.round(topClass.avgParticipants),
-            revenue: 0,
+            revenue: Math.round(topClass.avgRevenue),
             isTopPerformer: true,
-            isLocked: topClass.isLocked
+            isLocked: false
           };
 
           newScheduledClasses.push(scheduledClass);
@@ -278,15 +281,13 @@ function App() {
         }
       }
 
-      console.log('Default top classes scheduled:', newScheduledClasses.length);
+      console.log('Top classes scheduled:', newScheduledClasses.length);
 
       if (newScheduledClasses.length > 0) {
         setScheduledClasses(newScheduledClasses);
         setTeacherHours(calculateTeacherHours(newScheduledClasses));
         
-        if (data === csvData) {
-          alert(`Successfully populated ${newScheduledClasses.length} default top performing classes!\n\nThese are locked and won't be changed unless manually overridden.`);
-        }
+        alert(`Successfully populated ${newScheduledClasses.length} top performing classes (average > 5.0 participants)!`);
       } else {
         alert('No classes could be scheduled due to teacher hour constraints');
       }
@@ -324,7 +325,6 @@ function App() {
       // Validate the schedule meets all constraints
       const teacherHoursCheck: Record<string, number> = {};
       const invalidTeachers: string[] = [];
-      const emptySlots: string[] = [];
 
       // Check teacher hours
       optimizedSchedule.forEach(cls => {
@@ -337,24 +337,6 @@ function App() {
           invalidTeachers.push(`${teacher}: ${hours.toFixed(1)}h`);
         }
       });
-
-      // Check for empty slots in available time slots
-      const availableSlots = ['07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30'];
-      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-      
-      for (const location of locations) {
-        for (const day of days) {
-          for (const time of availableSlots) {
-            const classesInSlot = optimizedSchedule.filter(cls => 
-              cls.location === location && cls.day === day && cls.time === time
-            );
-            
-            if (classesInSlot.length === 0) {
-              emptySlots.push(`${location} - ${day} ${time}`);
-            }
-          }
-        }
-      }
 
       if (invalidTeachers.length > 0) {
         alert(`Warning: The following teachers exceed 15 hours:\n${invalidTeachers.join('\n')}\n\nSchedule applied with warnings.`);
@@ -375,10 +357,10 @@ function App() {
 • ${totalClasses} classes scheduled
 • ${totalTeachers} teachers utilized
 • ${(avgUtilization * 100).toFixed(1)}% average teacher utilization
-• ${emptySlots.length} empty slots remaining
 • Iteration ${optimizationIteration + 1}
 
 ✅ All scheduling rules enforced:
+• Classes filtered by average > 5.0 participants
 • Peak hours prioritized
 • Teacher hour limits respected
 • Location-specific formats applied
@@ -608,7 +590,7 @@ function App() {
                   ? 'bg-gradient-to-r from-yellow-600 to-orange-600 text-white hover:from-yellow-700 hover:to-orange-700'
                   : 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white hover:from-yellow-600 hover:to-orange-600'
               }`}
-              title="Populate default top performing classes with best teachers"
+              title="Populate classes with average > 5.0 participants"
             >
               {isPopulatingTopClasses ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
@@ -634,6 +616,19 @@ function App() {
                 <Brain className="h-4 w-4 mr-2" />
               )}
               <span className="text-sm font-medium">AI Optimize</span>
+            </button>
+
+            <button
+              onClick={() => setShowEnhancedOptimizer(true)}
+              className={`flex items-center justify-center px-4 py-3 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl ${
+                isDarkMode
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
+                  : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white hover:from-indigo-600 hover:to-purple-600'
+              }`}
+              title="Enhanced AI optimizer with multiple strategies"
+            >
+              <Target className="h-4 w-4 mr-2" />
+              <span className="text-sm font-medium">Enhanced AI</span>
             </button>
 
             <button
@@ -684,8 +679,8 @@ function App() {
               onClick={() => setShowOptimizer(true)}
               className={`flex items-center justify-center px-4 py-3 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl ${
                 isDarkMode
-                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
-                  : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white hover:from-indigo-600 hover:to-purple-600'
+                  ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white hover:from-teal-700 hover:to-cyan-700'
+                  : 'bg-gradient-to-r from-teal-500 to-cyan-500 text-white hover:from-teal-600 hover:to-cyan-600'
               }`}
             >
               <Target className="h-4 w-4 mr-2" />
@@ -792,6 +787,18 @@ function App() {
           <SmartOptimizer
             isOpen={showOptimizer}
             onClose={() => setShowOptimizer(false)}
+            csvData={csvData}
+            currentSchedule={scheduledClasses}
+            onOptimize={handleOptimizedSchedule}
+            isDarkMode={isDarkMode}
+          />
+        )}
+
+        {/* Enhanced Optimizer Modal */}
+        {showEnhancedOptimizer && (
+          <EnhancedOptimizerModal
+            isOpen={showEnhancedOptimizer}
+            onClose={() => setShowEnhancedOptimizer(false)}
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
